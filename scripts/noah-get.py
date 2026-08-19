@@ -4,11 +4,12 @@ import argparse
 import html
 import json
 import re
+import shutil
 import sys
 from pathlib import Path
 from typing import Any, TextIO
 from urllib.error import HTTPError, URLError
-from urllib.parse import quote, urlencode, urljoin
+from urllib.parse import quote, unquote, urlencode, urljoin, urlparse
 from urllib.request import Request, urlopen
 
 
@@ -26,6 +27,7 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument('--catalog', metavar='NAME', help='Only list this catalog and its subcatalogs.')
     parser.add_argument('--filter', metavar='KEYWORD', action='append', default=[], help='Only list resource names containing KEYWORD. Can be repeated.')
     parser.add_argument('--compact', action='store_true', help='Only output file names, size, date, MD5, and download URLs.')
+    parser.add_argument('--download', metavar='DIR', help='Download files to this directory preserving URL hierarchy.')
     parser.add_argument('--out', metavar='FILE', help='Write Markdown to FILE instead of stdout.')
     parser.add_argument('--verbose', action='store_true', help='Print progress to stderr.')
     return parser.parse_args()
@@ -151,12 +153,50 @@ def resource_markdown(resource: dict[str, Any], compact: bool) -> str:
     return '\n'.join(lines)
 
 
+def download_resource(resource: dict[str, Any], download_dir: Path, verbose: bool, compact: bool) -> None:
+    url = download_url(resource)
+    parsed_url = urlparse(url)
+    rel_path = unquote(parsed_url.path.lstrip('/'))
+    file_path = download_dir / rel_path
+
+    if file_path.exists():
+        if verbose:
+            print(f"Skipping existing file: {file_path}", file=sys.stderr)
+    else:
+        if verbose:
+            print(f"Downloading {url} to {file_path}", file=sys.stderr)
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        temp_file_path = file_path.with_name(file_path.name + '.downloading')
+        
+        try:
+            request = Request(url, headers={'User-Agent': USER_AGENT})
+            with urlopen(request, timeout=600) as response, temp_file_path.open('wb') as out_file:
+                shutil.copyfileobj(response, out_file)
+            temp_file_path.rename(file_path)
+        except Exception as error:
+            print(f"Failed to download {url}: {error}", file=sys.stderr)
+            if temp_file_path.exists():
+                temp_file_path.unlink()
+            return
+        except KeyboardInterrupt:
+            print(f"\nDownload interrupted. Cleaning up {temp_file_path}", file=sys.stderr)
+            if temp_file_path.exists():
+                temp_file_path.unlink()
+            raise
+
+    meta_path = file_path.with_name(file_path.name + '.md')
+    with meta_path.open('w', encoding='utf-8') as f:
+        f.write(resource_markdown(resource, compact) + '\n')
+
+
 def write_resources(
     product_id: int,
     catalog_id: int,
     output: TextIO,
     compact: bool,
     filters: list[str],
+    download_dir: Path | None,
+    verbose: bool,
 ) -> None:
     page_number = 1
     total_pages = 1
@@ -175,6 +215,8 @@ def write_resources(
         for resource in result.get('keys', []):
             if filters and not any(normalize_name(keyword) in normalize_name(resource_name(resource)) for keyword in filters):
                 continue
+            if download_dir:
+                download_resource(resource, download_dir, verbose, compact)
             write(output, f'{resource_markdown(resource, compact)}\n')
         total_pages = int(result.get('totalPage') or 1)
         page_number += 1
@@ -187,6 +229,7 @@ def write_catalog_markdown(
     verbose: bool,
     compact: bool,
     filters: list[str],
+    download_dir: Path | None,
     depth: int = 3,
     skip_root_heading: bool = False,
 ) -> None:
@@ -197,11 +240,11 @@ def write_catalog_markdown(
             write(output, f"{heading} {escape_markdown(str(node.get('name', '')).strip())}\n\n")
 
         if children:
-            write_catalog_markdown(children, product_id, output, verbose, compact, filters, depth + 1)
+            write_catalog_markdown(children, product_id, output, verbose, compact, filters, download_dir, depth + 1)
         else:
             if verbose:
                 print(f"Loading {str(node.get('name', '')).strip()}", file=sys.stderr)
-            write_resources(product_id, int(node['id']), output, compact, filters)
+            write_resources(product_id, int(node['id']), output, compact, filters, download_dir, verbose)
             write(output, '\n')
 
 
@@ -234,6 +277,8 @@ def main() -> None:
         output_file = output_path.open('w', encoding='utf-8')
         output = output_file
 
+    download_dir = Path(options.download) if options.download else None
+
     try:
         if not options.compact:
             write(output, '\n'.join([
@@ -253,6 +298,7 @@ def main() -> None:
             options.verbose,
             options.compact,
             options.filter,
+            download_dir,
             skip_root_heading=skip_root_heading,
         )
     finally:
