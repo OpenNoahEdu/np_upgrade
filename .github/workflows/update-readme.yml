@@ -30,7 +30,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          models=(NP1100 NP1200 NP1300 NP1300真情版 NP1380 NP1500 NP2150 NP2300 'NP2300+')
+          models=(NP1100 NP1200 NP1300 NP1300真情版 NP1380 NP1500 'NP1500/I新春版' NP2150 NP2300 'NP2300+')
 
           cat > README.md <<'EOF'
           # NP-upgrade
