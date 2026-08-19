@@ -174,12 +174,14 @@ def download_resource(resource: dict[str, Any], download_dir: Path, verbose: boo
                 shutil.copyfileobj(response, out_file)
             temp_file_path.rename(file_path)
         except Exception as error:
-            print(f"Failed to download {url}: {error}", file=sys.stderr)
+            if verbose:
+                print(f"Failed to download {url}: {error}", file=sys.stderr)
             if temp_file_path.exists():
                 temp_file_path.unlink()
             return
         except KeyboardInterrupt:
-            print(f"\nDownload interrupted. Cleaning up {temp_file_path}", file=sys.stderr)
+            if verbose:
+                print(f"\nDownload interrupted. Cleaning up {temp_file_path}", file=sys.stderr)
             if temp_file_path.exists():
                 temp_file_path.unlink()
             raise
@@ -255,6 +257,10 @@ def write(output: TextIO, content: str) -> None:
 
 def main() -> None:
     options = parse_arguments()
+    
+    if options.out or options.download:
+        options.verbose = True
+
     if options.verbose:
         print(f'Resolving product: {options.model}', file=sys.stderr)
     product = find_product(options.model)
@@ -305,7 +311,7 @@ def main() -> None:
         if output_file:
             output_file.close()
 
-    if options.out:
+    if options.out and options.verbose:
         print(f'Wrote {options.out}', file=sys.stderr)
 
 
