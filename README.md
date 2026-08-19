@@ -13,13 +13,13 @@
 ### 1. 生成 Markdown 文档
 使用管道将 YAML 数据传给渲染脚本：
 ```bash
-./scripts/noah-get.py NP1100 | ./scripts/noah-md.py - > list.md
+./scripts/noah-get.py NP1100 --catalog 系统升级 | ./scripts/noah-md.py - > list.md
 ```
 
 ### 2. 批量同步下载资源
 拉取型号的所有数据，并直接下载到本地：
 ```bash
-./scripts/noah-get.py NP1100 | ./scripts/noah-sync.py -
+./scripts/noah-get.py NP1100 --catalog 系统升级 | ./scripts/noah-sync.py - --verify-md5 --verbose
 ```
 
 ## 资源下载列表
