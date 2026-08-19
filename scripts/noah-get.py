@@ -24,6 +24,7 @@ def parse_arguments() -> argparse.Namespace:
     )
     parser.add_argument('model', help='Model name, for example: NP1100')
     parser.add_argument('--catalog', metavar='NAME', help='Only list this catalog and its subcatalogs.')
+    parser.add_argument('--filter', metavar='KEYWORD', action='append', default=[], help='Only list resource names containing KEYWORD. Can be repeated.')
     parser.add_argument('--compact', action='store_true', help='Only output file names, size, date, MD5, and download URLs.')
     parser.add_argument('--out', metavar='FILE', help='Write Markdown to FILE instead of stdout.')
     parser.add_argument('--verbose', action='store_true', help='Print progress to stderr.')
@@ -110,6 +111,10 @@ def download_url(resource: dict[str, Any]) -> str:
     return resource.get('url') or f"http://dl.youxuepai.com/download/courseware/{resource['id']}"
 
 
+def resource_name(resource: dict[str, Any]) -> str:
+    return str(resource.get('cname') or resource.get('name') or resource.get('fileName') or '')
+
+
 def resource_markdown(resource: dict[str, Any], compact: bool) -> str:
     fields = [
         ('资源 ID', resource.get('id')),
@@ -130,7 +135,7 @@ def resource_markdown(resource: dict[str, Any], compact: bool) -> str:
             ('更新日期', resource.get('updateTime')),
             ('MD5', resource.get('md5Code')),
         ]
-    lines = [f"- **{escape_markdown(resource.get('cname') or resource.get('name') or resource.get('fileName'))}**"]
+    lines = [f"- **{escape_markdown(resource_name(resource))}**"]
 
     for label, value in fields:
         if value not in (None, ''):
@@ -146,7 +151,13 @@ def resource_markdown(resource: dict[str, Any], compact: bool) -> str:
     return '\n'.join(lines)
 
 
-def write_resources(product_id: int, catalog_id: int, output: TextIO, compact: bool) -> None:
+def write_resources(
+    product_id: int,
+    catalog_id: int,
+    output: TextIO,
+    compact: bool,
+    filters: list[str],
+) -> None:
     page_number = 1
     total_pages = 1
 
@@ -162,6 +173,8 @@ def write_resources(product_id: int, catalog_id: int, output: TextIO, compact: b
         result = fetch_json(f'{API_BASE_URL}/search/api/searchsource?{parameters}')
 
         for resource in result.get('keys', []):
+            if filters and not any(normalize_name(keyword) in normalize_name(resource_name(resource)) for keyword in filters):
+                continue
             write(output, f'{resource_markdown(resource, compact)}\n')
         total_pages = int(result.get('totalPage') or 1)
         page_number += 1
@@ -173,6 +186,7 @@ def write_catalog_markdown(
     output: TextIO,
     verbose: bool,
     compact: bool,
+    filters: list[str],
     depth: int = 3,
     skip_root_heading: bool = False,
 ) -> None:
@@ -183,11 +197,11 @@ def write_catalog_markdown(
             write(output, f"{heading} {escape_markdown(str(node.get('name', '')).strip())}\n\n")
 
         if children:
-            write_catalog_markdown(children, product_id, output, verbose, compact, depth + 1)
+            write_catalog_markdown(children, product_id, output, verbose, compact, filters, depth + 1)
         else:
             if verbose:
                 print(f"Loading {str(node.get('name', '')).strip()}", file=sys.stderr)
-            write_resources(product_id, int(node['id']), output, compact)
+            write_resources(product_id, int(node['id']), output, compact, filters)
             write(output, '\n')
 
 
@@ -238,6 +252,7 @@ def main() -> None:
             output,
             options.verbose,
             options.compact,
+            options.filter,
             skip_root_heading=skip_root_heading,
         )
     finally:

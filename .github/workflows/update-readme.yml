@@ -1,0 +1,70 @@
+name: Update upgrade downloads
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 3 * * 1'
+  push:
+    branches:
+      - master
+    paths:
+      - scripts/noah-get.py
+      - .github/workflows/update-readme.yml
+
+permissions:
+  contents: write
+
+jobs:
+  update-readme:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Generate README
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          models=(NP1100 NP1200 NP1300 NP1300真情版 NP1380 NP1500 NP2150 NP2300 'NP2300+')
+
+          cat > README.md <<'EOF'
+          # NP-upgrade
+
+          诺亚舟NP系列学习机升级包下载地址整理
+          
+          EOF
+
+          for model in "${models[@]}"; do
+            printf '\n## %s\n\n' "$model" >> README.md
+            output_file="$(mktemp)"
+
+            if python3 scripts/noah-get.py "$model" --catalog 系统升级 --filter 升级程序 --compact --out "$output_file" 2>/dev/null \
+              || python3 scripts/noah-get.py "$model" --catalog 升级程序 --filter 升级程序 --compact --out "$output_file" 2>/dev/null \
+              || python3 scripts/noah-get.py "$model" --catalog 系统工具 --filter 升级程序 --compact --out "$output_file" 2>/dev/null \
+              || python3 scripts/noah-get.py "$model" --catalog 工具 --filter 升级程序 --compact --out "$output_file" 2>/dev/null; then
+              cat "$output_file" >> README.md
+            else
+              echo "No upgrade catalog found for $model" >&2
+              exit 1
+            fi
+
+            rm -f "$output_file"
+          done
+
+      - name: Commit README changes
+        shell: bash
+        run: |
+          if git diff --quiet -- README.md; then
+            exit 0
+          fi
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add README.md
+          git commit -m 'Update upgrade download links'
+          git push
